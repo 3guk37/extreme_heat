@@ -51,6 +51,9 @@ https://www.data.gouv.fr/datasets/donnees-climatologiques-de-base-quotidiennes
 - `données climatologiques de base quotidiennes`
 - `quot_departement_XX`
 
+**Processed temperature data**
+https://drive.google.com/file/d/1Gk5nXnru6G_UXIPqt9Y_SqYJfYldZPkg
+
 ---
 
 ### Hourly data (optional, targeted use)
