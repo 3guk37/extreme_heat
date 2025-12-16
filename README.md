@@ -64,6 +64,7 @@ https://www.data.gouv.fr/datasets/donnees-climatologiques-de-base-horaires/
 - `données climatologiques de base horaires`
 - `hor_departement_XX`
 
+Preprocesssed temperature data: **https://drive.google.com/file/d/1Gk5nXnru6G_UXIPqt9Y_SqYJfYldZPkg/view?usp=drive_link **
 ---
 
 ## Study regions
