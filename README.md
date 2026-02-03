@@ -28,6 +28,9 @@ By using the **Dew Point Spread** and **Air Pressure** as features, the model ca
 
 ## Data Integrity
 Every data fetch includes an automated **Plausibility Check**. This ensures that all retrieved values (Pressure, Temperature, and Humidity) align with physical meteorological limits before being used in the training pipeline.
+
 Literature:
+
 -https://www.frontiersin.org/journals/climate/articles/10.3389/fclim.2022.789641/full
+
 -https://www.nature.com/articles/s43247-025-02863-4
