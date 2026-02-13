@@ -1,0 +1,280 @@
+===============================================================================
+PROJECT DOCUMENTATION
+LOCATION-AWARE HEATWAVE EARLY WARNING SYSTEM (72h LEAD TIME) FOR 5 CITIES IN FRANCE
+===============================================================================
+
+AUTHOR: Simon Cardia
+DATE: 13_02_2026
+
+-------------------------------------------------------------------------------
+1. PROJECT OVERVIEW
+-------------------------------------------------------------------------------
+
+This project implements a location-aware, multi-city machine learning system
+for early detection of extreme heatwave events ("Klemens events") with a
+forecast horizon of 72 hours.
+
+The system is designed as a physical–statistical hybrid:
+- Meteorological domain knowledge defines features and targets
+- Machine learning (XGBoost) detects persistent heatwave signatures
+- Explicit emphasis on robustness under climate non-stationarity
+
+Target:
+Binary classification of extreme heat events defined by:
+- Temperature ≥ local P95 threshold
+- Persistence ≥ 72 consecutive hours
+
+-------------------------------------------------------------------------------
+2. DATA STRUCTURE & LOADING
+-------------------------------------------------------------------------------
+
+Processed data is stored as city-wise pairs:
+- Parquet file: time series data
+- JSON file: metadata, variable definitions, time span
+
+Data is loaded into memory as:
+- processed_frames[city] → pandas DataFrame
+- processed_logs[city]   → metadata dictionary
+
+Each city covers:
+- Time span: 1990-01-01 to 2025-12-31
+- Resolution: hourly
+- ~315,000 rows per city
+- 14 meteorological variables
+
+Cities included:
+- Bordeaux
+- Lyon
+- Marseille
+- Marseille-Marignane (Reference for Maseille)
+- Paris
+
+-------------------------------------------------------------------------------
+3. MEMORY OPTIMIZATION
+-------------------------------------------------------------------------------
+
+All floating-point features are downcast:
+- float64 → float32
+
+Result:
+~50% reduction in RAM usage without loss of numerical stability.
+
+-------------------------------------------------------------------------------
+4. METEOROLOGICAL FEATURE ENGINEERING
+-------------------------------------------------------------------------------
+
+4.1 Hourly Z-Score Standardization (Core Design Choice)
+
+All numerical meteorological features are transformed into hourly anomalies:
+
+Z = (value - mean(month, hour)) / std(month, hour)
+
+Motivation:
+
+1) Decoupling the Sun from the Signal
+   Raw temperature and radiation are dominated by diurnal cycles.
+   Z-scores answer:
+   “Is it unusually hot for THIS hour in THIS month?”
+
+   This allows detection of heatwave build-up during night-time hours.
+
+2) Scale Unification
+   Pressure (hPa), wind (m/s), radiation (W/m²) become comparable.
+   Z = +3 always means “extreme”, regardless of unit.
+
+3) Extreme Event Amplification
+   Heatwaves are anomalies by definition.
+   Z-scores quantify extremeness directly.
+
+Result:
+The model operates entirely on anomalies, not absolute values.
+
+-------------------------------------------------------------------------------
+5. STATISTICAL FOUNDATION: SPEARMAN CORRELATION
+-------------------------------------------------------------------------------
+
+Spearman correlation is used throughout all dependency analyses.
+
+Reasons:
+
+- Rank-based → robust against outliers
+- Captures non-linear monotonic relationships
+- Scale-independent
+- Better suited for atmospheric processes than Pearson
+
+This provides a cleaner physical signal for lag-based heatwave detection.
+
+-------------------------------------------------------------------------------
+6. FEATURE COLLINEARITY & CLUSTERING
+-------------------------------------------------------------------------------
+
+Method:
+- Spearman correlation matrix
+- Hierarchical clustering (Ward linkage)
+- Summer-only subset (May–September)
+- Distance threshold: 1.5
+
+Purpose:
+- Identify redundant features
+- Reveal physically meaningful variable groups
+- Validate meteorological consistency across cities
+
+Findings:
+- Stable clusters for:
+  - Upper-air wind components (u/v at 850 & 500 hPa)
+  - Temperature columns (T2m, T850, T500)
+  - Soil moisture & humidity
+  - Radiation and directional wind terms
+
+Cluster composition varies by geography (coastal vs continental),
+confirming the need for location-aware modeling.
+
+-------------------------------------------------------------------------------
+7. LOCATION-AWARE DATA PREPARATION
+-------------------------------------------------------------------------------
+
+Cities are merged into a single training dataset with:
+
+- One-Hot Encoding of city identity (loc_* columns)
+- Seasonal filtering: May–September only
+- Chronological split:
+  - Training: ≤ 2015
+  - Testing: ≥ 2016
+
+This split acts as a climate endurance test, forcing the model to
+generalize into a warmer, shifted climate regime.
+
+-------------------------------------------------------------------------------
+8. MODEL ARCHITECTURE (XGBOOST)
+-------------------------------------------------------------------------------
+
+Classifier:
+XGBoost Gradient Boosted Trees
+
+Key parameters:
+- n_estimators: 300
+- max_depth: 8
+- learning_rate: 0.03
+- scale_pos_weight: class imbalance correction
+- tree_method: hist
+- n_jobs: all cores
+
+Design philosophy:
+- Favor recall over precision
+- Capture multi-variable interactions
+- Handle rare extreme events robustly
+
+-------------------------------------------------------------------------------
+9. GLOBAL PERFORMANCE (POST-2016 TEST SET)
+-------------------------------------------------------------------------------
+
+Test size: 183,600 summer hours
+
+Overall metrics:
+- Accuracy: 0.89
+- Heat Recall: 0.83
+- Heat Precision: 0.62
+- Heat F1-Score: 0.71
+
+Interpretation:
+~83% of all extreme heat events are detected 72 hours in advance.
+
+-------------------------------------------------------------------------------
+10. REGIONAL PERFORMANCE (LOCATION-AWARE)
+-------------------------------------------------------------------------------
+
+City-wise Heat Recall:
+- Lyon:      0.91
+- Paris:     0.87
+- Bordeaux:  0.89
+- Marseille: 0.75
+- Marignane: 0.75
+
+Findings:
+- Continental regions show higher recall
+- Coastal regions introduce maritime noise
+- Stable F1-scores confirm effective location encoding
+
+-------------------------------------------------------------------------------
+11. CONFUSION MATRIX INSIGHTS
+-------------------------------------------------------------------------------
+
+Correctly detected heat hours: 82.8%
+Missed dangerous hours:      17.2%
+False alarm rate (normal):    9.5%
+
+The system behaves as a cautious early-warning model:
+False positives are preferred over missed events.
+
+-------------------------------------------------------------------------------
+12. CONFIDENT FALSE POSITIVE ANALYSIS
+-------------------------------------------------------------------------------
+
+Definition:
+False positives with predicted probability > 80%
+
+Count: ~5,460 hours
+
+Observations:
+- Concentration in Lyon and Bordeaux
+- Average Z-score temperature anomaly: +1.40
+
+Interpretation:
+These are meteorologically extreme situations that narrowly miss
+the strict 72h persistence definition.
+
+-------------------------------------------------------------------------------
+13. NEAR-MISS DURATION ANALYSIS
+-------------------------------------------------------------------------------
+
+Only ~2% of false positives exceed 24 hours of P95 heat.
+<1% approach the 72h threshold.
+
+Conclusion:
+Errors are primarily caused by duration mismatch,
+not by incorrect physical detection.
+
+-------------------------------------------------------------------------------
+14. PHYSICAL STABILITY ANALYSIS
+-------------------------------------------------------------------------------
+
+Compared metrics:
+- Wind variance (v_850hPa)
+- Mean pressure change (24h)
+
+Results:
+- Confident false positives show LOWER wind variance
+- True heatwaves are slightly more turbulent aloft
+
+-------------------------------------------------------------------------------
+15. THE "STABILITY TRAP"
+-------------------------------------------------------------------------------
+
+Key insight:
+
+The model is biased toward extremely stable upper-air patterns.
+These “too perfect” synoptic situations trigger strong alarms,
+but small-scale surface cooling interrupts persistence.
+
+Paradox:
+False alarms look more stable than real heatwaves.
+
+-------------------------------------------------------------------------------
+16. FINAL CONCLUSION
+-------------------------------------------------------------------------------
+
+This system is a physically consistent, recall-optimized,
+location-aware early warning model for extreme heat events.
+
+Its errors are:
+- Meteorologically plausible
+- Driven by definition thresholds, not noise
+- Biased toward caution rather than omission
+
+Overall:
+An F1-score of ~0.71 for 72h-lead P95 heat events in a
+non-stationary climate regime is a strong and defensible result.
+
+===============================================================================
+END OF DOCUMENT
+===============================================================================
